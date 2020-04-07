@@ -1,0 +1,131 @@
+---
+title: "Practical Machine Learning, course project"
+output:
+  html_document: 
+    keep_md: true 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+The goal of the project is to predict the manner in which they did the exercise.
+
+
+
+```{r libs, echo=FALSE}
+library(caret)
+library(parallel)
+library(doParallel)
+```
+
+## Loading data
+
+First we need to load data into training and testing sets.
+
+```{r load}
+training <- X <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), na.strings=c("NA","#DIV/0!", ""))
+testing <- X <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"), na.strings=c("NA","#DIV/0!", ""))
+```
+
+## Cleaning data
+
+We will remove columns with no data.
+
+```{r clean}
+set.seed(2222)
+trainingset<-training[,colSums(is.na(training)) == 0]
+testingset <-testing[,colSums(is.na(testing)) == 0]
+```
+
+First 7 columns are not usefull for the model, se we remove them.
+
+```{r clean2}
+trainingset   <-trainingset[,-c(1:7)]
+testingset <-testingset[,-c(1:7)]
+dim(trainingset)
+```
+
+After cleaning we have 53 variables in the dataset.
+
+## Create data partition for cross validation
+
+We will split the training set to perform cross validation.
+
+```{r partition}
+traintrainset <- createDataPartition(y=trainingset$classe, p=0.75, list=FALSE)
+trainingSetForTraining <- trainingset[traintrainset, ]
+trainingSetForTesting <- trainingset[-traintrainset, ]
+```
+
+## Check if there are higly correlated valiables
+
+One way to reduce the number of variables is to find the highly correlated ones and remove them.
+
+```{r cor}
+
+calculateCor <- trainingSetForTraining[,1:52]
+calculateCor[] <- lapply(calculateCor, function(x) {   if(is.factor(x)) as.numeric(as.character(x)) else x})
+correlationMatrix <- cor(calculateCor)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.5)
+print(highlyCorrelated)
+
+```
+
+Now we will keep the first variable and remove the other ones.
+
+```{r cor1}
+size <- length(highlyCorrelated)
+removedCorTrainTrain <- trainingSetForTraining[,-highlyCorrelated[2:size]]
+removedCorTrainTest <- trainingSetForTesting[,-highlyCorrelated[2:size]]
+removedCorTest <- testingset[,-highlyCorrelated[2:size]]
+
+dim(removedCorTrainTrain)
+```
+
+Now we have 23 vairbles left.
+
+## Train the model with random forest
+
+It takes a lot of time to process the model, so we will use parallel computing to make it faster.
+
+```{r parallel}
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+tControl <- trainControl(classProbs=TRUE, savePredictions=TRUE, allowParallel=TRUE)
+```
+
+Now we can train the model.
+
+```{r train}
+set.seed(12345)
+trainingModel <- train(classe ~ ., data=removedCorTrainTrain, method="rf")
+```
+Once finalised we remove the cluster
+
+
+```{r}
+stopCluster(cluster)
+```
+
+## Testing data
+
+Now we will test the model with the testing partition from the training set.
+
+```{r test1}
+traingTestPredict <- predict(trainingModel, removedCorTrainTest)
+confusionMatrix(traingTestPredict, removedCorTrainTest$classe)
+```
+
+## Testing data
+
+We will predict data with the testing set.
+
+```{r test2}
+testPredict <- predict(trainingModel, removedCorTest)
+testPredict
+```
